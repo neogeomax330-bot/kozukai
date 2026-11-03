@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1599bd">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+<title>小遣い簿</title>
+</head>
+<body>
+<header>
+  <h1>小遣い簿</h1>
+  <div class="month-nav">
+    <button id="prevMonth" aria-label="前月">‹</button>
+    <span id="monthLabel"></span>
+    <button id="nextMonth" aria-label="翌月">›</button>
+  </div>
+</header>
+
+<section class="summary" aria-label="今月の集計">
+  <div>今月の支出<strong id="total">¥0</strong></div>
+  <div>予算の残り<strong id="remain">-</strong></div>
+  <button id="budgetBtn" class="link">予算設定</button>
+</section>
+
+<main>
+  <section class="screen active" id="homeView" aria-label="入力">
+    <div class="entry-type" role="group" aria-label="収支の種類">
+      <button type="button" class="type-btn selected" data-type="expense">支出</button>
+      <button type="button" class="type-btn" data-type="income">収入</button>
+    </div>
+    <label class="date-control">日付 <input id="date" type="date" required></label>
+    <h2 class="section-title">カテゴリを選択</h2>
+    <div id="categoryGroups" class="category-groups" role="tablist" aria-label="カテゴリの分類"></div>
+    <div id="cats" class="category-grid"></div>
+    <input id="memo" type="text" placeholder="メモ（店名など・任意）" autocomplete="off" aria-label="メモ">
+    <div id="ocrStatus" hidden></div>
+    <div class="amount-panel">
+      <label class="amount-label" for="amount">金額</label>
+      <div class="amount-display">
+        <input id="amount" type="text" inputmode="none" placeholder="0" autocomplete="off" aria-label="金額">
+        <button type="button" id="clearAmount" aria-label="金額をクリア">×</button>
+      </div>
+      <input type="file" id="receipt" accept="image/*" capture="environment" hidden>
+      <div class="keypad" aria-label="金額入力">
+        <button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button>
+        <label class="key-tool" for="receipt" aria-label="レシートを読み取る">📷</label>
+        <button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button>
+        <button type="button" id="memoFocus" class="key-tool" aria-label="メモを入力">📝</button>
+        <button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button>
+        <button type="button" id="saveEntry" class="save-entry">入力</button>
+        <button type="button" data-key="00">00</button><button type="button" data-key="0">0</button>
+        <button type="button" id="backspace" class="key-tool" aria-label="一文字削除">⌫</button>
+      </div>
+      <button type="button" id="deleteEntry" class="delete-entry" hidden>この記録を削除</button>
+    </div>
+  </section>
+
+  <section class="screen" id="recordsView" aria-label="支出・収入">
+    <h2 class="view-title">支出 / 収入</h2>
+    <label class="filter-control">表示
+      <select id="recordFilter">
+        <option value="all">すべて</option>
+        <option value="expense">支出</option>
+        <option value="income">収入</option>
+      </select>
+    </label>
+    <div id="recordsList"></div>
+  </section>
+
+  <section class="screen" id="budgetView" aria-label="予算">
+    <h2 class="view-title">予算 / 貯金</h2>
+    <div class="budget-card">
+      <span>今月の予算</span>
+      <strong id="budgetAmount">未設定</strong>
+      <span>予算の残り</span>
+      <strong id="budgetRemain">-</strong>
+      <button type="button" id="editBudget">予算を設定</button>
+    </div>
+    <p class="hint">予算の残りは、予算から今月の支出を引いて表示します。</p>
+  </section>
+
+  <section class="screen" id="ledgerView" aria-label="通帳">
+    <h2 class="view-title">通帳</h2>
+    <div id="ledgerList"></div>
+  </section>
+
+  <section class="screen" id="reportView" aria-label="レポート">
+    <h2 class="view-title">今月のカテゴリ別支出</h2>
+    <div id="reportList"></div>
+  </section>
+</main>
+
+<nav class="bottom-nav" aria-label="メインメニュー">
+  <button type="button" class="nav-button active" data-view="homeView"><span aria-hidden="true">🏠</span>ホーム</button>
+  <button type="button" class="nav-button" data-view="recordsView"><span aria-hidden="true">💸</span>支出/収入</button>
+  <button type="button" class="nav-button" data-view="budgetView"><span aria-hidden="true">🐷</span>予算/貯金</button>
+  <button type="button" class="nav-button" data-view="ledgerView"><span aria-hidden="true">📒</span>通帳</button>
+  <button type="button" class="nav-button" data-view="reportView"><span aria-hidden="true">📊</span>レポート</button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>

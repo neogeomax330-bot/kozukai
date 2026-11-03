@@ -1,0 +1,11 @@
+{
+  "name": "小遣い簿",
+  "short_name": "小遣い簿",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f2f8fa",
+  "theme_color": "#1599bd",
+  "icons": [
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}
