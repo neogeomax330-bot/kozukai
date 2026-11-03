@@ -201,10 +201,15 @@ $('saveEntry').onclick = () => {
   }
   save();
   editId = null;
+  entryType = 'expense';
+  category = CATEGORIES.expense[0];
+  activeExpenseGroup = 0;
+  setType(entryType);
   $('deleteEntry').hidden = true;
   setAmount('');
   $('memo').value = '';
   $('date').value = today();
+  $('ocrStatus').hidden = true;
   render();
   document.querySelectorAll('.screen').forEach(screen => screen.classList.toggle('active', screen.id === 'recordsView'));
   document.querySelectorAll('.nav-button').forEach(button => button.classList.toggle('active', button.dataset.view === 'recordsView'));
@@ -251,39 +256,171 @@ function loadScript(src) {
 }
 
 function parseReceipt(text) {
-  const normalized = text.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/[，]/g, ',');
+  const normalized = text
+    .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[，]/g, ',')
+    .replace(/[￥¥]/g, '¥')
+    .replace(/[‐‑‒–—−]/g, '-');
   const num = value => Number(value.replace(/[^\d]/g, ''));
+  const lines = normalized.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const totalLabel = /合\s*計|お\s*会\s*計|総\s*額|ご\s*請求|請求\s*額|お買上(?:げ)?|お預り|total/i;
+  const amountsInLine = line => [...line.matchAll(/(?:¥\s*)?([\d]{1,3}(?:[,\s][\d]{3})+|[\d]{3,9})(?:\s*円)?/g)]
+    .map(match => num(match[1])).filter(value => value > 0);
   let amount = 0;
-  const totalPattern = /(合\s*計|お?会\s*計|総\s*額|請求|total)[^\d\n]{0,12}[¥￥\\]?\s*([\d,]{2,9})/gi;
-  const candidates = [...normalized.matchAll(totalPattern)].map(match => num(match[2]));
-  if (candidates.length) amount = Math.max(...candidates);
-  else {
-    const values = [...normalized.matchAll(/[¥￥\\]\s*([\d,]{2,9})|([\d,]{2,9})\s*円/g)].map(match => num(match[1] || match[2]));
-    if (values.length) amount = Math.max(...values);
+  const labeledCandidates = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!totalLabel.test(lines[i].replace(/\s/g, ''))) continue;
+    const sameLineAmounts = amountsInLine(lines[i]);
+    const candidates = sameLineAmounts.length ? sameLineAmounts : amountsInLine(lines[i + 1] || '');
+    labeledCandidates.push(...candidates);
   }
-  const dateMatch = normalized.match(/(20\d{2})\s*[年\/.\-]\s*(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})/);
-  const date = dateMatch ? `${dateMatch[1]}-${pad(+dateMatch[2])}-${pad(+dateMatch[3])}` : '';
-  const store = normalized.split('\n').map(line => line.trim()).find(line => /[ぁ-んァ-ン一-龥A-Za-z]{3,}/.test(line)) || '';
+  if (labeledCandidates.length) {
+    amount = Math.max(...labeledCandidates);
+  } else {
+    const currencyCandidates = [...normalized.matchAll(/[¥\\]\s*([\d,]{2,9})|([\d,]{2,9})\s*円/g)]
+      .map(match => num(match[1] || match[2])).filter(value => value > 0);
+    if (currencyCandidates.length) amount = Math.max(...currencyCandidates);
+  }
+  let date = '';
+  const fullDate = normalized.match(/(20\d{2})\s*[年\/.\-]\s*(\d{1,2})\s*[月\/.\-]\s*(\d{1,2})/);
+  const shortDate = normalized.match(/(?:^|\D)(\d{1,2})\s*[\/.\-]\s*(\d{1,2})(?:\D|$)/);
+  if (fullDate) {
+    date = `${fullDate[1]}-${pad(+fullDate[2])}-${pad(+fullDate[3])}`;
+  } else if (shortDate) {
+    const month = +shortDate[1], day = +shortDate[2], year = new Date().getFullYear();
+    const parsedDate = new Date(year, month - 1, day);
+    if (month >= 1 && month <= 12 && parsedDate.getDate() === day) {
+      date = `${year}-${pad(month)}-${pad(day)}`;
+    }
+  }
+  const store = lines.find(line => /[ぁ-んァ-ン一-龥A-Za-z]{3,}/.test(line) && !totalLabel.test(line)) || '';
   return { amount, date, store: store.replace(/\s+/g, '').slice(0, 20) };
+}
+
+function prepareReceiptImage(file, threshold = false) {
+  return createImageBitmap(file).then(bitmap => {
+    const maxSide = 2400;
+    const scale = Math.min(2, maxSide / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) {
+      bitmap.close();
+      throw new Error('画像を処理できませんでした。');
+    }
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const histogram = new Uint32Array(256);
+    for (let i = 0; i < image.data.length; i += 4) {
+      const gray = Math.round(image.data[i] * 0.299 + image.data[i + 1] * 0.587 + image.data[i + 2] * 0.114);
+      image.data[i] = image.data[i + 1] = image.data[i + 2] = gray;
+      histogram[gray]++;
+    }
+    if (threshold) {
+      const total = image.data.length / 4;
+      let sum = 0;
+      for (let i = 0; i < 256; i++) sum += i * histogram[i];
+      let backgroundWeight = 0, backgroundSum = 0, maxVariance = 0, cutoff = 180;
+      for (let i = 0; i < 256; i++) {
+        backgroundWeight += histogram[i];
+        if (!backgroundWeight) continue;
+        const foregroundWeight = total - backgroundWeight;
+        if (!foregroundWeight) break;
+        backgroundSum += i * histogram[i];
+        const backgroundMean = backgroundSum / backgroundWeight;
+        const foregroundMean = (sum - backgroundSum) / foregroundWeight;
+        const variance = backgroundWeight * foregroundWeight * (backgroundMean - foregroundMean) ** 2;
+        if (variance > maxVariance) {
+          maxVariance = variance;
+          cutoff = i;
+        }
+      }
+      for (let i = 0; i < image.data.length; i += 4) {
+        const value = image.data[i] < cutoff ? 0 : 255;
+        image.data[i] = image.data[i + 1] = image.data[i + 2] = value;
+      }
+    } else {
+      let low = 255, high = 0;
+      const count = image.data.length / 4;
+      const lowTarget = count * 0.02, highTarget = count * 0.98;
+      let cumulative = 0;
+      for (let i = 0; i < 256; i++) {
+        cumulative += histogram[i];
+        if (cumulative >= lowTarget) { low = i; break; }
+      }
+      cumulative = 0;
+      for (let i = 0; i < 256; i++) {
+        cumulative += histogram[i];
+        if (cumulative >= highTarget) { high = i; break; }
+      }
+      const range = Math.max(1, high - low);
+      for (let i = 0; i < image.data.length; i += 4) {
+        const value = Math.max(0, Math.min(255, ((image.data[i] - low) / range) * 255));
+        image.data[i] = image.data[i + 1] = image.data[i + 2] = value;
+      }
+    }
+    context.putImageData(image, 0, 0);
+    return canvas;
+  });
 }
 
 $('receipt').onchange = async event => {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
+  editId = null;
+  entryType = 'expense';
+  category = CATEGORIES.expense[0];
+  activeExpenseGroup = 0;
+  setType(entryType);
+  $('amount').value = '';
+  $('memo').value = '';
+  $('date').value = today();
+  $('deleteEntry').hidden = true;
   const status = $('ocrStatus');
   status.hidden = false;
   status.textContent = 'レシートを読み取り中…';
   try {
     if (!window.Tesseract) await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
-    const { data } = await Tesseract.recognize(file, 'jpn+eng');
-    const result = parseReceipt(data.text);
+    status.textContent = '画像を補正して文字を読み取っています…';
+    const enhanced = await prepareReceiptImage(file);
+    const firstPass = await Tesseract.recognize(enhanced, 'jpn+eng', {
+      logger: message => {
+        if (message.status === 'recognizing text' && message.progress) {
+          status.textContent = `レシートを読み取り中… ${Math.round(message.progress * 100)}%`;
+        }
+      }
+    });
+    let result = parseReceipt(firstPass.data.text);
+    if (!result.amount) {
+      status.textContent = '読み取りを調整して再試行しています…';
+      const highContrast = await prepareReceiptImage(file, true);
+      const secondPass = await Tesseract.recognize(highContrast, 'jpn+eng');
+      const retryResult = parseReceipt(secondPass.data.text);
+      if (retryResult.amount) {
+        result = {
+          amount: retryResult.amount,
+          date: retryResult.date || result.date,
+          store: retryResult.store || result.store
+        };
+      }
+    }
     if (result.amount) setAmount(String(result.amount));
     if (result.date) $('date').value = result.date;
     if (result.store) $('memo').value = result.store;
-    status.textContent = result.amount ? '読み取り完了。内容を確認して入力してください。' : '金額を読み取れませんでした。手入力してください。';
+    status.textContent = result.amount
+      ? '読み取り完了。金額や日付、メモを確認してから入力してください。'
+      : '金額を読み取れませんでした。画像を明るく平らに撮り直すか、金額を手入力してください。';
   } catch (error) {
-    status.textContent = '読み取りに失敗しました。通信環境を確認して手入力してください。';
+    console.error('Receipt OCR failed:', error);
+    status.textContent = `読み取りに失敗しました: ${error.message || '通信環境を確認して手入力してください。'}`;
   }
 };
 
